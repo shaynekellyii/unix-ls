@@ -8,6 +8,7 @@
  * Imports                                                     *
  ***************************************************************/
 #include "UnixLs.h"
+#include "list.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,6 +32,7 @@ char *dirName; /* The directory to ls, if specified. */
  * Function Prototypes                                         *
  ***************************************************************/
 static uint8_t ParseFlagsFromArgs(char *argString);
+static void PrintFileNameInfo(LIST *fileNames);
 
 /***************************************************************
  * Global Functions                                            *
@@ -39,8 +41,7 @@ static uint8_t ParseFlagsFromArgs(char *argString);
 int main(int argc, char *argv[]) {
     DIR *dir = NULL;
     struct dirent *dirent = NULL;
-    struct stat *statBuf = NULL;
-    
+    LIST *fileNames = ListCreate();
     flags = (FLAGS *)malloc(sizeof(FLAGS));
     dirName = ".";
     
@@ -48,7 +49,7 @@ int main(int argc, char *argv[]) {
      * Parse all flag arguments from terminal.
      * Only the last arg can specify a directory. 
      */
-    for (uint8_t i = 0; i < argc - 2; i++) {
+    for (int i = 1; i < argc - 1; i++) {
         char *currentArg = argv[i];
         if (!ParseFlagsFromArgs(currentArg)) {
             free(flags);
@@ -57,7 +58,7 @@ int main(int argc, char *argv[]) {
     }
     
     /* Check if last argument specifies a directory or a flag (if arguments are specified). */
-    if (argc) {
+    if (argc > 1) {
         char *currentArg = argv[argc - 1];
         if (currentArg[0] == '-') {
             /* Parse flags from last arg. Directory to search is current directory. */
@@ -77,20 +78,19 @@ int main(int argc, char *argv[]) {
         exit(0);
     }
 
-    /* Loop reading each file until the end of the directory. */
+    /* Loop reading each filename and add it to the list until the end of the directory. */
     do {
         errno = 0;
         if ((dirent = readdir(dir)) != NULL) {
-            printf("%s\n", dirent->d_name);
+            /* Don't add hidden files to the list. */
+            if (dirent->d_name[0] != '.') {
+                ListAppend(fileNames, dirent->d_name);
+            }
         }
     } while (dirent != NULL);
     
-    /* Get the file status. */
-//    if (stat(dirent->d_name, statBuf)) {
-//        printf("Getting file status failed.\n");
-//        free(flags);
-//        exit(0);
-//    }
+    /* Print the filenames (based on the flags specified). */
+    PrintFileNameInfo(fileNames);
     
     /* Close the directory. */
     if (closedir(dir)) {
@@ -119,18 +119,18 @@ static uint8_t ParseFlagsFromArgs(char *argString) {
     }
     
     /* Must specify a flag string with a dash. */
-    if (argString[0] != '-') {
+    if (argString[0] == '-') {
         /* Parse through all characters for flags */
-        for (uint8_t i = 1; i < strlen(argString); i++) {
+        for (size_t i = 1; i < strlen(argString); i++) {
             switch (argString[i]) {
                 case 'i':
                     flags->fields.i = 1;
                     break;
                 case 'l':
-                    flags->fields.L = 1;
+                    flags->fields.l = 1;
                     break;
                 case 'R':
-                    flags->fields.r = 1;
+                    flags->fields.R = 1;
                     break;
                 default:
                     /* Fail on an invalid argument. */
@@ -143,4 +143,24 @@ static uint8_t ParseFlagsFromArgs(char *argString) {
         return 0;
     }
     return 1;
+}
+
+static void PrintFileNameInfo(LIST *fileNames) {
+    struct stat *statBuf = NULL;
+    ListFirst(fileNames);
+    
+    /* Formatting for l flag = false. */
+    if (!flags->fields.l) {
+        for (int i = 0; i < ListCount(fileNames); i++) {
+            printf("%-25s ", ListCurr(fileNames));
+            if (i != 0 && !((i + 1) % 4)) {
+                printf("\n");
+            }
+            ListNext(fileNames);
+        }
+        /* Add a line break if needed. */
+        if (ListCount(fileNames) % 4) {
+            printf("\n");
+        }
+    }
 }

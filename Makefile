@@ -1,13 +1,16 @@
 CC = gcc
 CFLAGS = -g -Wall -Wextra -I -pthread
-PROG = UnixLs
-OBJS = UnixLs.o
+PROG = UnixLs 
+OBJS = UnixLs.o list.o
 
-run: $(OBJS)
+UnixLs: $(OBJS)
 	$(CC) $(CFLAGS) -o $(PROG) $(OBJS)
 
-.c.o:
-	$(CC) $(CFLAGS) -c $*.c
+list.o: list.c
+	$(CC) $(CFLAGS) -c list.c
+
+UnixLs.o: list.h
+	$(CC) $(CFLAGS) -c UnixLs.c
 
 clean:
-	rm *.o UnixLs
+	rm *.o UnixLs 

@@ -9,8 +9,8 @@
 typedef union FLAGS {
     struct {
         unsigned int i : 1;
-        unsigned int L : 1;
-        unsigned int r : 1;
+        unsigned int l : 1;
+        unsigned int R : 1;
     } fields;
     uint8_t bits;
 } FLAGS;
