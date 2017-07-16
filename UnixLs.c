@@ -15,12 +15,15 @@
 #include <errno.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 
 /***************************************************************
  * Defines and Constants                                       *
  ***************************************************************/
 #define ALL_FLAGS_SET   7
 #define CURR_DIRECTORY  "."
+#define PERMISSION_LEN  9
+#define STAT_FAIL_CODE  -1
 
 /***************************************************************
  * Statics                                                     *
@@ -33,6 +36,8 @@ char *dirName; /* The directory to ls, if specified. */
  ***************************************************************/
 static uint8_t ParseFlagsFromArgs(char *argString);
 static void PrintFileNameInfo(LIST *fileNames);
+static void PrintFileDescLine(char *fileName);
+static void BuildPermissionString(char *string, mode_t permissions);
 
 /***************************************************************
  * Global Functions                                            *
@@ -40,7 +45,7 @@ static void PrintFileNameInfo(LIST *fileNames);
 
 int main(int argc, char *argv[]) {
     DIR *dir = NULL;
-    struct dirent *dirent = NULL;
+    struct dirent *dp = NULL;
     LIST *fileNames = ListCreate();
     flags = (FLAGS *)malloc(sizeof(FLAGS));
     dirName = ".";
@@ -81,13 +86,13 @@ int main(int argc, char *argv[]) {
     /* Loop reading each filename and add it to the list until the end of the directory. */
     do {
         errno = 0;
-        if ((dirent = readdir(dir)) != NULL) {
+        if ((dp = readdir(dir)) != NULL) {
             /* Don't add hidden files to the list. */
-            if (dirent->d_name[0] != '.') {
+            if (dp->d_name[0] != '.') {
                 ListAppend(fileNames, dirent->d_name);
             }
         }
-    } while (dirent != NULL);
+    } while (dp != NULL);
     
     /* Print the filenames (based on the flags specified). */
     PrintFileNameInfo(fileNames);
@@ -145,8 +150,11 @@ static uint8_t ParseFlagsFromArgs(char *argString) {
     return 1;
 }
 
+/**
+ * Takes a list of file and directory names, then outputs to terminal the files
+ * and directories in the format specified by any flags inputted by the user.
+ */
 static void PrintFileNameInfo(LIST *fileNames) {
-    struct stat *statBuf = NULL;
     ListFirst(fileNames);
     
     /* Formatting for l flag = false. */
@@ -162,5 +170,57 @@ static void PrintFileNameInfo(LIST *fileNames) {
         if (ListCount(fileNames) % 4) {
             printf("\n");
         }
+    } else { /* Formatting for l flag = true. */
+        for (int i = 0; i < ListCount(fileNames); i++) {
+            PrintFileDescLine(ListCurr(fileNames));
+            ListNext(fileNames);
+        }
     }
+}
+
+/**
+ * Used for printing to the terminal when the -l flag is specified.
+ * Gets the relevant file info for ls -l and prints a single line for the
+ * specified file or directory name.
+ */
+static void PrintFileDescLine(char *fileName) {
+    struct stat statBuf;
+    
+    /* Get file info using stat system call. */
+    if (stat(fileName, &statBuf) == STAT_FAIL_CODE) {
+        fprintf(stderr, "Stat call failed for %s: ", fileName);
+        perror("");
+        free(flags);
+        exit(0);
+    }
+    
+    /* Set char to specify if the entity is a file or directory. */
+    char dirChar = (statBuf.st_mode & S_IFDIR) ? 'd' : '-';
+    
+    /* Parse permission string from st_mode. */
+    char *permissionString = (char *)malloc(sizeof(char) * PERMISSION_LEN);
+    BuildPermissionString(permissionString, statBuf.st_mode);
+    
+    /* Print entire file desc string. */
+    printf("%c%s %s\n", dirChar, permissionString, fileName);
+    
+    /* Free memory. */
+    free(permissionString);
+}
+
+/**
+ * Builds a permission string to be printed with ls -l.
+ * Converts a mode_t variable specifying permissions into a permission string
+ * (e.g. -rw-r--r--) and stores it in the char pointer given.
+ */
+static void BuildPermissionString(char *string, mode_t permissions) {
+    string[0] = (permissions & S_IRUSR) ? 'r' : '-';
+    string[1] = (permissions & S_IWUSR) ? 'w' : '-';
+    string[2] = (permissions & S_IXUSR) ? 'x' : '-';
+    string[3] = (permissions & S_IRGRP) ? 'r' : '-';
+    string[4] = (permissions & S_IRGRP) ? 'w' : '-';
+    string[5] = (permissions & S_IRGRP) ? 'x' : '-';
+    string[6] = (permissions & S_IROTH) ? 'r' : '-';
+    string[7] = (permissions & S_IROTH) ? 'w' : '-';
+    string[8] = (permissions & S_IROTH) ? 'x' : '-';
 }
