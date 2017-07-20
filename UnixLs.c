@@ -30,13 +30,14 @@
  ***************************************************************/
 FLAGS *flags; /* ls options specified in args */
 char *dirName; /* The directory to ls, if specified. */
+char fileNameBuf[150];
 
 /***************************************************************
  * Function Prototypes                                         *
  ***************************************************************/
 static uint8_t ParseFlagsFromArgs(char *argString);
-static void PrintFileNameInfo(LIST *fileNames);
-static void PrintFileDescLine(char *fileName);
+static void PrintFileNameInfo(char *dirName, LIST *fileNames);
+static void PrintFileDescLine(char *dirName, char *fileName);
 static void BuildPermissionString(char *string, mode_t permissions);
 
 /***************************************************************
@@ -89,13 +90,13 @@ int main(int argc, char *argv[]) {
         if ((dp = readdir(dir)) != NULL) {
             /* Don't add hidden files to the list. */
             if (dp->d_name[0] != '.') {
-                ListAppend(fileNames, dirent->d_name);
+                ListAppend(fileNames, dp->d_name);
             }
         }
     } while (dp != NULL);
     
     /* Print the filenames (based on the flags specified). */
-    PrintFileNameInfo(fileNames);
+    PrintFileNameInfo(dirName, fileNames);
     
     /* Close the directory. */
     if (closedir(dir)) {
@@ -154,25 +155,18 @@ static uint8_t ParseFlagsFromArgs(char *argString) {
  * Takes a list of file and directory names, then outputs to terminal the files
  * and directories in the format specified by any flags inputted by the user.
  */
-static void PrintFileNameInfo(LIST *fileNames) {
+static void PrintFileNameInfo(char *dirName, LIST *fileNames) {
     ListFirst(fileNames);
     
     /* Formatting for l flag = false. */
     if (!flags->fields.l) {
         for (int i = 0; i < ListCount(fileNames); i++) {
-            printf("%-25s ", ListCurr(fileNames));
-            if (i != 0 && !((i + 1) % 4)) {
-                printf("\n");
-            }
+            printf("%s\n",ListCurr(fileNames));
             ListNext(fileNames);
-        }
-        /* Add a line break if needed. */
-        if (ListCount(fileNames) % 4) {
-            printf("\n");
         }
     } else { /* Formatting for l flag = true. */
         for (int i = 0; i < ListCount(fileNames); i++) {
-            PrintFileDescLine(ListCurr(fileNames));
+            PrintFileDescLine(dirName, ListCurr(fileNames));
             ListNext(fileNames);
         }
     }
@@ -183,19 +177,31 @@ static void PrintFileNameInfo(LIST *fileNames) {
  * Gets the relevant file info for ls -l and prints a single line for the
  * specified file or directory name.
  */
-static void PrintFileDescLine(char *fileName) {
+static void PrintFileDescLine(char *dirName, char *fileName) {
     struct stat statBuf;
     
+    /* Append directory name to file name. */
+    memset(fileNameBuf, 0, 150);
+    strncpy(fileNameBuf, dirName, strlen(dirName));
+    strncpy(fileNameBuf + strlen(dirName), "/", 1);
+    strncpy(fileNameBuf + strlen(dirName) + 1, fileName, strlen(fileName));
+    
     /* Get file info using stat system call. */
-    if (stat(fileName, &statBuf) == STAT_FAIL_CODE) {
-        fprintf(stderr, "Stat call failed for %s: ", fileName);
+    if (stat(fileNameBuf, &statBuf) == STAT_FAIL_CODE) {
+        fprintf(stderr, "Stat call failed for %s: ", fileNameBuf);
         perror("");
         free(flags);
         exit(0);
     }
     
-    /* Set char to specify if the entity is a file or directory. */
-    char dirChar = (statBuf.st_mode & S_IFDIR) ? 'd' : '-';
+    /* Set char to specify if the entity is a file or directory or symbolic link. */
+    char dirChar = '-';
+    printf(%u\n, statBuf.st_mode);
+    if (S_ISDIR(statBuf.st_mode)) {
+        dirChar = 'd';
+    } else if (S_ISLNK(statBuf.st_mode)) {
+        dirChar = 'l';
+    }
     
     /* Parse permission string from st_mode. */
     char *permissionString = (char *)malloc(sizeof(char) * PERMISSION_LEN);
