@@ -12,8 +12,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <unistd.h>
 #include <errno.h>
 #include <dirent.h>
+#include <pwd.h>
+#include <grp.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -22,6 +26,8 @@
  ***************************************************************/
 #define ALL_FLAGS_SET   7
 #define CURR_DIRECTORY  "."
+#define DATE_LEN        18
+#define NAME_LEN        150
 #define PERMISSION_LEN  9
 #define STAT_FAIL_CODE  -1
 
@@ -30,7 +36,8 @@
  ***************************************************************/
 FLAGS *flags; /* ls options specified in args */
 char *dirName; /* The directory to ls, if specified. */
-char fileNameBuf[150];
+char fileNameBuf[NAME_LEN]; /* Store a directory name with file name appended. */
+char linkNameBuf[NAME_LEN]; /* Store the filename that a symbolic link points to. */
 
 /***************************************************************
  * Function Prototypes                                         *
@@ -39,6 +46,7 @@ static uint8_t ParseFlagsFromArgs(char *argString);
 static void PrintFileNameInfo(char *dirName, LIST *fileNames);
 static void PrintFileDescLine(char *dirName, char *fileName);
 static void BuildPermissionString(char *string, mode_t permissions);
+static void BuildDateString(char *string, time_t *time);
 
 /***************************************************************
  * Global Functions                                            *
@@ -181,37 +189,60 @@ static void PrintFileDescLine(char *dirName, char *fileName) {
     struct stat statBuf;
     
     /* Append directory name to file name. */
-    memset(fileNameBuf, 0, 150);
+    memset(fileNameBuf, 0, NAME_LEN);
     strncpy(fileNameBuf, dirName, strlen(dirName));
     strncpy(fileNameBuf + strlen(dirName), "/", 1);
     strncpy(fileNameBuf + strlen(dirName) + 1, fileName, strlen(fileName));
     
     /* Get file info using stat system call. */
-    if (stat(fileNameBuf, &statBuf) == STAT_FAIL_CODE) {
+    if (lstat(fileNameBuf, &statBuf) == STAT_FAIL_CODE) {
         fprintf(stderr, "Stat call failed for %s: ", fileNameBuf);
         perror("");
         free(flags);
         exit(0);
     }
     
-    /* Set char to specify if the entity is a file or directory or symbolic link. */
-    char dirChar = '-';
-    printf(%u\n, statBuf.st_mode);
+    /* Check if the file is a directory or symbolic link. */
+    char dirChar = '-'; /* char preceding the permission string. */
+    memset(linkNameBuf, 0, NAME_LEN);
     if (S_ISDIR(statBuf.st_mode)) {
         dirChar = 'd';
-    } else if (S_ISLNK(statBuf.st_mode)) {
+    } else if (((statBuf.st_mode)&(S_IFMT)) == (S_IFLNK)) {
         dirChar = 'l';
+        /* Set string denoting which file the link points to. */
+        ssize_t len = 0;
+        snprintf(linkNameBuf, strlen(" -> ") + 1, " -> ");
+        if ((len = readlink(fileNameBuf,
+                            linkNameBuf + strlen(" -> "),
+                            sizeof(linkNameBuf) - 3))
+            != -1) {
+            linkNameBuf[len + strlen(" -> ") + 1] = '\0';
+        }
     }
     
     /* Parse permission string from st_mode. */
     char *permissionString = (char *)malloc(sizeof(char) * PERMISSION_LEN);
     BuildPermissionString(permissionString, statBuf.st_mode);
     
+    /* Parse date string from last modified time. */
+    char *dateString = (char *)malloc(sizeof(char) * DATE_LEN);
+    BuildDateString(dateString, &(statBuf.st_mtime));
+    
     /* Print entire file desc string. */
-    printf("%c%s %s\n", dirChar, permissionString, fileName);
+    printf("%c%s %u %s  %s  %5llu %s %s%s\n",
+           dirChar,
+           permissionString,
+           statBuf.st_nlink,
+           getpwuid(statBuf.st_uid)->pw_name,
+           getgrgid(statBuf.st_gid)->gr_name,
+           statBuf.st_size,
+           dateString,
+           fileName,
+           linkNameBuf);
     
     /* Free memory. */
     free(permissionString);
+    free(dateString);
 }
 
 /**
@@ -229,4 +260,13 @@ static void BuildPermissionString(char *string, mode_t permissions) {
     string[6] = (permissions & S_IROTH) ? 'r' : '-';
     string[7] = (permissions & S_IROTH) ? 'w' : '-';
     string[8] = (permissions & S_IROTH) ? 'x' : '-';
+}
+
+/**
+ * Takes a time_t parameter, formats a date string, and stores it in the
+ * provided char pointer.
+ * The format is: mmm dd yyyy hh:mm
+ */
+static void BuildDateString(char *string, time_t *time) {
+    strftime(string, DATE_LEN, "%b %e %Y %R", localtime(time));
 }
