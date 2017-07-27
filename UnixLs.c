@@ -44,6 +44,8 @@ char inodeBuf[INODE_LEN];   /* Store the inode number to print to the screen. */
 /***************************************************************
  * Function Prototypes                                         *
  ***************************************************************/
+static void OpenDirAndPrintContents(char *dirName);
+static void HandleRecursion(DIR *dir, char *dirName);
 static uint8_t ParseFlagsFromArgs(char *argString);
 static void PrintFileNameInfo(char *dirName, LIST *fileNames);
 static void PrintFileDescLine(char *dirName, char *fileName);
@@ -55,9 +57,6 @@ static void BuildDateString(char *string, time_t *time);
  ***************************************************************/
 
 int main(int argc, char *argv[]) {
-    DIR *dir = NULL;
-    struct dirent *dp = NULL;
-    LIST *fileNames = ListCreate();
     flags = (FLAGS *)malloc(sizeof(FLAGS));
     dirName = ".";
     
@@ -87,13 +86,32 @@ int main(int argc, char *argv[]) {
         }
     }
     
+    OpenDirAndPrintContents(dirName);
+    
+    free(flags);
+    exit(0);
+}
+
+/***************************************************************
+ * Static Functions                                            *
+ ***************************************************************/
+
+/**
+ * Goes through the process of printing all the directory contents
+ * based on the flags specified. Will recurse if -R is specified.
+ */
+static void OpenDirAndPrintContents(char *dirName) {
+    DIR *dir = NULL;
+    struct dirent *dp = NULL;
+    LIST *fileNames = ListCreate(); /* TODO: remove list usage. */
+    
     /* Open the directory. (current directory if none specified) */
     if ((dir = opendir(dirName)) == NULL) {
         perror("Failed to open the directory");
         free(flags);
         exit(0);
     }
-
+    
     /* Loop reading each filename and add it to the list until the end of the directory. */
     do {
         errno = 0;
@@ -108,20 +126,66 @@ int main(int argc, char *argv[]) {
     /* Print the filenames (based on the flags specified). */
     PrintFileNameInfo(dirName, fileNames);
     
+    /* Handle recursion if necessary. */
+    if (flags->fields.R == 1) {
+        HandleRecursion(dir, dirName);
+    }
+    
     /* Close the directory. */
     if (closedir(dir)) {
         printf("Closing the directory failed.\n");
         free(flags);
         exit(0);
     }
-    
-    free(flags);
-    exit(0);
 }
 
-/***************************************************************
- * Static Functions                                            *
- ***************************************************************/
+/**
+ * Re-traverses the directory specified, and prints the contents of any
+ * directory within the specified directory.
+ * dirName parameter should specify the entire path.
+ */
+static void HandleRecursion(DIR *dir, char *dirName) {
+    printf("\nRecursion time\n");
+    rewinddir(dir);
+    printf("Rewinded\n");
+    struct stat statBuf;
+    struct dirent *dp = NULL;
+    
+    /* Loop reading each name in the directory and re-traverse any directories found.
+     * Skip over anything that isn't a directory.
+     */
+    do {
+        errno = 0;
+        if ((dp = readdir(dir)) != NULL) {
+            /* Don't include hidden file/directory names. */
+            if (dp->d_name[0] != '.') {
+                /* Append dirname to get full path if needed. */
+                memset(fileNameBuf, 0, NAME_LEN);
+                if (dirName[0] != '/') {
+                    printf("dirName: %s\n", dirName);
+                    realpath(dirName, fileNameBuf);
+                    printf("realPath: %s\n", fileNameBuf);
+                    strncpy(fileNameBuf + strlen(fileNameBuf), "/", 1);
+                    strncpy(fileNameBuf + strlen(fileNameBuf), &dp->d_name[0], strlen(&dp->d_name[0]));
+                } else {
+                    strncpy(fileNameBuf, dirName, strlen(dirName));
+                }
+                
+                printf("fileNameBuf: %s\n", fileNameBuf);
+                if (lstat(fileNameBuf, &statBuf) == STAT_FAIL_CODE) {
+                    fprintf(stderr, "Stat call failed for %s: \n", &(dp->d_name[0]));
+                    perror("");
+                    free(flags);
+                    exit(0);
+                }
+                if (S_ISDIR(statBuf.st_mode)) {
+                    OpenDirAndPrintContents(fileNameBuf);
+                }
+            }
+        }
+    } while (dp != NULL);
+}
+
 /**
  * Take a string of args beginning with '-' and set flags for ls.
  * Only accept 'i', 'l', and 'R' flags.
