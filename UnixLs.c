@@ -27,6 +27,7 @@
 #define ALL_FLAGS_SET   7
 #define CURR_DIRECTORY  "."
 #define DATE_LEN        18
+#define INODE_LEN       10
 #define NAME_LEN        150
 #define PERMISSION_LEN  9
 #define STAT_FAIL_CODE  -1
@@ -34,10 +35,11 @@
 /***************************************************************
  * Statics                                                     *
  ***************************************************************/
-FLAGS *flags; /* ls options specified in args */
-char *dirName; /* The directory to ls, if specified. */
+FLAGS *flags;               /* ls options specified in args */
+char *dirName;              /* The directory to ls, if specified. */
 char fileNameBuf[NAME_LEN]; /* Store a directory name with file name appended. */
 char linkNameBuf[NAME_LEN]; /* Store the filename that a symbolic link points to. */
+char inodeBuf[INODE_LEN];   /* Store the inode number to print to the screen. */
 
 /***************************************************************
  * Function Prototypes                                         *
@@ -202,6 +204,12 @@ static void PrintFileDescLine(char *dirName, char *fileName) {
         exit(0);
     }
     
+    /* Check if we should print the inode number. */
+    memset(inodeBuf, 0, INODE_LEN);
+    if (flags->fields.i) {
+        snprintf(inodeBuf, INODE_LEN, "%llu ", statBuf.st_ino);
+    }
+    
     /* Check if the file is a directory or symbolic link. */
     char dirChar = '-'; /* char preceding the permission string. */
     memset(linkNameBuf, 0, NAME_LEN);
@@ -229,7 +237,8 @@ static void PrintFileDescLine(char *dirName, char *fileName) {
     BuildDateString(dateString, &(statBuf.st_mtime));
     
     /* Print entire file desc string. */
-    printf("%c%s %u %s  %s  %5llu %s %s%s\n",
+    printf("%s%c%s %u %s  %s  %5llu %s %s%s\n",
+           inodeBuf,
            dirChar,
            permissionString,
            statBuf.st_nlink,
