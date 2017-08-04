@@ -46,7 +46,7 @@ uint8_t printDirTitle = 0;  /* Keeps track if the directory name should be print
  ***************************************************************/
 static void OpenDirAndPrintContents(char *dirToPrint);
 static void HandleRecursion(DIR *dir, char *path);
-static uint8_t ParseFlagsFromArgs(char *argString);
+static void ParseFlagsFromArgs(char *argString);
 static void PrintFileNameInfo(char *pathToFile, char *dirName);
 static void PrintSimpleNameWithIno(char *dirName, char *fileName);
 static void PrintFileDescLine(char *dirName, char *fileName);
@@ -59,16 +59,12 @@ static void BuildDateString(char *string, time_t *time);
 
 int main(int argc, char *argv[]) {
     flags = (FLAGS *)malloc(sizeof(FLAGS));
-    dirName = ".";
     uint8_t argIndex = 1;
 
     /* Parse all arguments starting with - for flags. */
     char *currentArg = argv[argIndex];
     while (argIndex < argc && currentArg[0] == '-') {
-        if (!ParseFlagsFromArgs(argv[argIndex])) {
-            free(flags);
-            exit(0);
-        }
+        ParseFlagsFromArgs(argv[argIndex]);
         currentArg = argv[++argIndex];
     }
 
@@ -80,13 +76,18 @@ int main(int argc, char *argv[]) {
         printDirTitle = 1;
     }
 
-    /* Print directory contents for the remaining arguments (if any, if not print contents of "."). */
-    for (int i = argIndex; i < argc; i++) {
-        currentArg = argv[i];
-        OpenDirAndPrintContents(currentArg);
+    /* If a directory argument wasn't specified (no args remaining), then print contents of ".". */
+    if (argIndex >= argc) {
+        OpenDirAndPrintContents(".");
+    } else {
+        /* Print directory contents for the remaining arguments (if any, if not print contents of "."). */
+        for (int i = argIndex; i < argc; i++) {
+            currentArg = argv[i];
+            OpenDirAndPrintContents(currentArg);
+        }
     }
     
-    /* Clean up allocated dynamic memory. */
+    /* Clean up allocated dynamic memory and terminate program. */
     free(flags);
     exit(0);
 }
@@ -103,56 +104,64 @@ static void OpenDirAndPrintContents(char *dirToPrint) {
     DIR *dir = NULL;
     struct dirent *dp = NULL;
 
+    /* Set local buffer to keep track of the directory to print. */
     char localDir[NAME_LEN];
     memset(localDir, 0, sizeof(localDir));
     strncpy(localDir, dirToPrint, strlen(dirToPrint));
 
-    /* Print the directory name if more than one is being printed (for recursion). */
+    /**
+     * Print the directory name if more than one is being printed 
+     * (e.g. multiple directories specified, or recursion). 
+     */
     if (printDirTitle) {
         printf("\n%s:\n", localDir);
     }
     
     /* Open the directory. (current directory if none specified) */
     if ((dir = opendir(localDir)) == NULL) {
-        perror("Failed to open the directory\n");
+        fprintf(stderr, "ls: %s: ", localDir);
+        perror("");
         free(flags);
-        exit(0);
+        exit(1);
     }
     
     /* Loop reading each filename and add it to the list until the end of the directory. */
     do {
         errno = 0;
         if ((dp = readdir(dir)) != NULL) {
-            /* Don't add hidden files to the list. */
+            /* Don't add print hidden files/directories to the list (anything with a '.' prepended). */
             if (dp->d_name[0] != '.') {
                 PrintFileNameInfo(localDir, dp->d_name);
             }
         }
     } while (dp != NULL);
+    
+    /* One directory has been printed, any subsequent prints should print the directory title. */
     printDirTitle = 1;
     
     /* Handle recursion if necessary. */
     if (flags->fields.R == 1) {
-        // rewinddir(dir);
         HandleRecursion(dir, localDir);
     }
     
     /* Close the directory. */
     if (closedir(dir)) {
-        printf("Closing the directory failed.\n");
+        fprintf(stderr, "ls: %s: ", localDir);
+        perror("");
         free(flags);
-        exit(0);
+        exit(1);
     }
 }
 
 /**
  * Re-traverses the directory specified, and prints the contents of any
  * directory within the specified directory.
- * dirName parameter should specify the entire path.
  */
 static void HandleRecursion(DIR *dir, char *path) {
     struct stat statBuf;
     struct dirent *dp = NULL;
+    
+    /* Re-traverse the entire directory. */
     rewinddir(dir);
     
     /* Loop reading each name in the directory and re-traverse any directories found.
@@ -163,25 +172,24 @@ static void HandleRecursion(DIR *dir, char *path) {
         if ((dp = readdir(dir)) != NULL) {
             /* Don't include hidden file/directory names. */
             if (dp->d_name[0] != '.') {
-                /* Append dirname to get full path if needed. */
+                /* Build the full path of the file/directory name. */
                 memset(fileNameBuf, 0, NAME_LEN);
-                //printf("[DBG] dirName: %s\n", path);
                 realpath(path, fileNameBuf);
-                // printf("[DBG] realPath: %s\n", fileNameBuf);
                 if (fileNameBuf[strlen(fileNameBuf) - 1] != '/') {
                     strncpy(fileNameBuf + strlen(fileNameBuf), "/", 1);
                 }
                 strncpy(fileNameBuf + strlen(fileNameBuf), &dp->d_name[0], strlen(&dp->d_name[0]));
-                // printf("[DBG] fileNameBuf: %s\n", fileNameBuf);
 
+                /* Get lstat info. */
                 if (lstat(fileNameBuf, &statBuf) == STAT_FAIL_CODE) {
-                    fprintf(stderr, "[DBG] Recur stat call failed for %s: \n", fileNameBuf);
+                    fprintf(stderr, "ls: %s: ", fileNameBuf);
                     perror("");
                     free(flags);
-                    exit(0);
+                    exit(1);
                 }
+
+                /* Print the directory contents if the given path is a directory. */
                 if (S_ISDIR(statBuf.st_mode)) {
-                    // printf("[DBG] open dir: %s\n", fileNameBuf);
                     OpenDirAndPrintContents(fileNameBuf);
                 }
             }
@@ -194,53 +202,49 @@ static void HandleRecursion(DIR *dir, char *path) {
  * Only accept 'i', 'l', and 'R' flags.
  * Return 1 on success, 0 on failure.
  */
-static uint8_t ParseFlagsFromArgs(char *argString) {
-    /* Check if all the flags are already set. */ {
-        if (flags->bits == ALL_FLAGS_SET) {
-            return 1;
-        }
+static void ParseFlagsFromArgs(char *argString) {
+    /* Check if all the flags are already set. */
+    if (flags->bits == ALL_FLAGS_SET) {
+        return;
     }
     
-    /* Must specify a flag string with a dash. */
-    if (argString[0] == '-') {
-        /* Parse through all characters for flags */
-        for (size_t i = 1; i < strlen(argString); i++) {
-            switch (argString[i]) {
-                case 'i':
-                    flags->fields.i = 1;
-                    break;
-                case 'l':
-                    flags->fields.l = 1;
-                    break;
-                case 'R':
-                    flags->fields.R = 1;
-                    break;
-                default:
-                    /* Fail on an invalid argument. */
-                    printf("Invalid argument specified. Only i, l, or R allowed.\n");
-                    return 0;
-            }
+    /* Parse through all characters for flags */
+    for (size_t i = 1; i < strlen(argString); i++) {
+        switch (argString[i]) {
+            case 'i':
+                flags->fields.i = 1;
+                break;
+            case 'l':
+                flags->fields.l = 1;
+                break;
+            case 'R':
+                flags->fields.R = 1;
+                break;
+            default:
+                /* Fail on an invalid argument. */
+                printf("ls: Invalid argument specified. Only i, l, or R allowed.\n");
+                free(flags);
+                exit(1);
         }
-    } else {
-        printf("Only the last argument can specify a directory.\n");
-        return 0;
     }
-    return 1;
 }
 
 /**
- * Takes a list of file and directory names, then outputs to terminal the files
+ * Takes a path to a given name, then outputs to terminal the files
  * and directories in the format specified by any flags inputted by the user.
  */
 static void PrintFileNameInfo(char *pathToFile, char *fileName) {
     /* Formatting for l flag = false. */
     if (!flags->fields.l) {
         if (flags->fields.i) {
+            /* Print simple name with inode number. */
             PrintSimpleNameWithIno(pathToFile, fileName);
         } else {
+            /* Print simple name. */
             printf("%s\n", fileName);
         }
     } else { /* Formatting for l flag = true. */
+        /* Print long format. */
         PrintFileDescLine(pathToFile, fileName);
     }
 }
@@ -262,11 +266,12 @@ static void PrintSimpleNameWithIno(char *dirName, char *fileName) {
             
     /* Get file info using stat system call. */
     if (lstat(nameBuf, &statBuf) == STAT_FAIL_CODE) {
-        fprintf(stderr, "Stat call failed for %s: ", nameBuf);
+        fprintf(stderr, "ls: %s: ", nameBuf);
         perror("");
         free(flags);
-        exit(0);
+        exit(1);
     }
+
     printf("%llu %s\n", statBuf.st_ino, fileName);
 }
 
@@ -289,12 +294,11 @@ static void PrintFileDescLine(char *dirName, char *fileName) {
     strncpy(nameBuf + strlen(nameBuf), fileName, strlen(fileName));
     
     /* Get file info using stat system call. */
-    //printf("Desc line namebuf: %s\n", nameBuf);
     if (lstat(nameBuf, &statBuf) == STAT_FAIL_CODE) {
-        fprintf(stderr, "Stat call failed for %s: ", nameBuf);
+        fprintf(stderr, "ls: %s: ", nameBuf);
         perror("");
         free(flags);
-        exit(0);
+        exit(1);
     }
     
     /* Check if we should print the inode number. */
@@ -316,8 +320,11 @@ static void PrintFileDescLine(char *dirName, char *fileName) {
         if ((len = readlink(nameBuf,
                             linkNameBuf + strlen(linkNameBuf),
                             sizeof(linkNameBuf) - strlen(linkNameBuf)))
-            != -1) {
-            //linkNameBuf[len + strlen(" -> ")] = '\0';
+            == -1) {
+            fprintf(stderr, "ls: %s: ", linkNameBuf);
+            perror("");
+            free(flags);
+            exit(1);
         }
     }
     
@@ -342,7 +349,7 @@ static void PrintFileDescLine(char *dirName, char *fileName) {
            fileName,
            linkNameBuf);
     
-    /* Free memory. */
+    /* Free allocated dynamic memory. */
     free(permissionString);
     free(dateString);
 }
@@ -358,11 +365,11 @@ static void BuildPermissionString(char *string, mode_t permissions) {
     string[1] = (permissions & S_IWUSR) ? 'w' : '-';
     string[2] = (permissions & S_IXUSR) ? 'x' : '-';
     string[3] = (permissions & S_IRGRP) ? 'r' : '-';
-    string[4] = (permissions & S_IRGRP) ? 'w' : '-';
-    string[5] = (permissions & S_IRGRP) ? 'x' : '-';
+    string[4] = (permissions & S_IWGRP) ? 'w' : '-';
+    string[5] = (permissions & S_IXGRP) ? 'x' : '-';
     string[6] = (permissions & S_IROTH) ? 'r' : '-';
-    string[7] = (permissions & S_IROTH) ? 'w' : '-';
-    string[8] = (permissions & S_IROTH) ? 'x' : '-';
+    string[7] = (permissions & S_IWOTH) ? 'w' : '-';
+    string[8] = (permissions & S_IXOTH) ? 'x' : '-';
 }
 
 /**

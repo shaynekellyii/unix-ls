@@ -1,0 +1,51 @@
+/***************************************************************
+ * CMPT 300 - UnixLs assignment 				   			   *
+ * Author: Shayne Kelly II                                     *
+ * Date: July 15, 2017                                         *
+ ***************************************************************/
+
+/***** Virtual memory written questions *****/
+
+****
+ 1. Explain how the system establishes the physical location for a virtual address.
+
+ - Virtual memory space is 2^32 bytes.
+ - Physical memory space is 2^18 bytes.
+ - Page size is 4096 (2^12) bytes.
+ - The user process generates the virtual address 0x11123456.
+
+ The page number is the first 20 bits (32-12) of the virtual address and 
+ the page offset is the last 12 bits of the virtual address.
+
+ Establishing the physical location uses the Translation Look-aside Buffer hardware.
+ 1. The page number and offset are separated in the logical address. (hardware)
+ 2. The page number is sent to the TLB. (hardware)
+ 3a. If the page number is in the TLB, the frame number is accessed from the TLB. (hardware)
+ 3b. If the page number is not in the TLB, the frame number must be looked up in
+ 	 the page table in main memory. (software)
+ 4. The frame number and offset are added together to obtain the physical address. (hardware)
+
+****
+2. Find the maximum page-fault rate for an effective access time of <=200 ns.
+ 
+ Page fault service times:
+ - 8 ms if empty page available or replaced page not modified (occurs 30% of the time)
+ - 20 ms if the replaced page was modified (occurs 70% of the time)
+ Memory access time:
+ - 100 ns
+
+Page faults can add 100 ns (0.0001 ms) on average for 200 ns effective access time.
+
+Average page fault time: 
+(8 ms * 0.3) + (20 ms + 0.7) 
+= 2.4 ms + 14 ms
+= 16.4 ms
+= 1.64 * 10^7 ns
+
+Effective access time = access time + (page fault time * page fault rate)
+200 ns = [(1 - pf%) * 100 ns] + [(pf%) * (1.64 * 10^7 ns)]
+= 200 = 100 - (100 * pf%) + (1.64*10^7 * pf%)
+= 100 = (1.64*10^7 - 100) * pf%
+= pf% = 0.00000609759
+
+The maximum page-fault rate is 0.00061%.
