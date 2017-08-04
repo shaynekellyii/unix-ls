@@ -25,10 +25,10 @@
  ***************************************************************/
 #define ALL_FLAGS_SET   7
 #define CURR_DIRECTORY  "."
-#define DATE_LEN        18
-#define INODE_LEN       10
+#define DATE_LEN        22
+#define INODE_LEN       14
 #define NAME_LEN        400
-#define PERMISSION_LEN  9
+#define PERMISSION_LEN  12
 #define STAT_FAIL_CODE  -1
 
 /***************************************************************
@@ -282,6 +282,7 @@ static void PrintSimpleNameWithIno(char *dirName, char *fileName) {
 static void PrintFileDescLine(char *dirName, char *fileName) {
     struct stat statBuf;
     char nameBuf[NAME_LEN];
+    memset(&statBuf, 0, sizeof(struct stat));
     
     /* Append directory name to file name. */
     memset(nameBuf, 0, NAME_LEN);
@@ -303,7 +304,7 @@ static void PrintFileDescLine(char *dirName, char *fileName) {
     /* Check if we should print the inode number. */
     memset(inodeBuf, 0, INODE_LEN);
     if (flags->fields.i) {
-        snprintf(inodeBuf, INODE_LEN, "%llu ", statBuf.st_ino);
+        snprintf(inodeBuf, INODE_LEN, "%-10llu ", statBuf.st_ino);
     }
     
     /* Check if the file is a directory or symbolic link. */
@@ -356,6 +357,7 @@ static void PrintFileDescLine(char *dirName, char *fileName) {
  * (e.g. -rw-r--r--) and stores it in the char pointer given.
  */
 static void BuildPermissionString(char *string, mode_t permissions) {
+    memset(string, 0, PERMISSION_LEN);
     string[0] = (permissions & S_IRUSR) ? 'r' : '-';
     string[1] = (permissions & S_IWUSR) ? 'w' : '-';
     string[2] = (permissions & S_IXUSR) ? 'x' : '-';
