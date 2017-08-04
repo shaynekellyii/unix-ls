@@ -8,7 +8,6 @@
  * Imports                                                     *
  ***************************************************************/
 #include "UnixLs.h"
-#include "list.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,7 +27,7 @@
 #define CURR_DIRECTORY  "."
 #define DATE_LEN        18
 #define INODE_LEN       10
-#define NAME_LEN        150
+#define NAME_LEN        400
 #define PERMISSION_LEN  9
 #define STAT_FAIL_CODE  -1
 
@@ -40,14 +39,16 @@ char *dirName;              /* The directory to ls, if specified. */
 char fileNameBuf[NAME_LEN]; /* Store a directory name with file name appended. */
 char linkNameBuf[NAME_LEN]; /* Store the filename that a symbolic link points to. */
 char inodeBuf[INODE_LEN];   /* Store the inode number to print to the screen. */
+uint8_t firstDirPrinted = 0;/* Keeps track if the first directory was printed (for recursion). */
 
 /***************************************************************
  * Function Prototypes                                         *
  ***************************************************************/
-static void OpenDirAndPrintContents(char *dirName);
-static void HandleRecursion(DIR *dir, char *dirName);
+static void OpenDirAndPrintContents(char *dirToPrint);
+static void HandleRecursion(DIR *dir, char *path);
 static uint8_t ParseFlagsFromArgs(char *argString);
-static void PrintFileNameInfo(char *dirName, LIST *fileNames);
+static void PrintFileNameInfo(char *pathToFile, char *dirName);
+static void PrintSimpleNameWithIno(char *dirName, char *fileName);
 static void PrintFileDescLine(char *dirName, char *fileName);
 static void BuildPermissionString(char *string, mode_t permissions);
 static void BuildDateString(char *string, time_t *time);
@@ -57,6 +58,7 @@ static void BuildDateString(char *string, time_t *time);
  ***************************************************************/
 
 int main(int argc, char *argv[]) {
+    firstDirPrinted = 0;
     flags = (FLAGS *)malloc(sizeof(FLAGS));
     dirName = ".";
     
@@ -86,6 +88,7 @@ int main(int argc, char *argv[]) {
         }
     }
     
+    //strncpy(fileNameBuf, dirName, strlen(dirName));
     OpenDirAndPrintContents(dirName);
     
     free(flags);
@@ -100,14 +103,22 @@ int main(int argc, char *argv[]) {
  * Goes through the process of printing all the directory contents
  * based on the flags specified. Will recurse if -R is specified.
  */
-static void OpenDirAndPrintContents(char *dirName) {
+static void OpenDirAndPrintContents(char *dirToPrint) {
     DIR *dir = NULL;
     struct dirent *dp = NULL;
-    LIST *fileNames = ListCreate(); /* TODO: remove list usage. */
+
+    char localDir[NAME_LEN];
+    memset(localDir, 0, sizeof(localDir));
+    strncpy(localDir, dirToPrint, strlen(dirToPrint));
+
+    /* Print the directory name if more than one is being printed (for recursion). */
+    if (firstDirPrinted) {
+        printf("\n%s:\n", localDir);
+    }
     
     /* Open the directory. (current directory if none specified) */
-    if ((dir = opendir(dirName)) == NULL) {
-        perror("Failed to open the directory");
+    if ((dir = opendir(localDir)) == NULL) {
+        perror("Failed to open the directory\n");
         free(flags);
         exit(0);
     }
@@ -118,17 +129,16 @@ static void OpenDirAndPrintContents(char *dirName) {
         if ((dp = readdir(dir)) != NULL) {
             /* Don't add hidden files to the list. */
             if (dp->d_name[0] != '.') {
-                ListAppend(fileNames, dp->d_name);
+                PrintFileNameInfo(localDir, dp->d_name);
             }
         }
     } while (dp != NULL);
-    
-    /* Print the filenames (based on the flags specified). */
-    PrintFileNameInfo(dirName, fileNames);
+    firstDirPrinted = 1;
     
     /* Handle recursion if necessary. */
     if (flags->fields.R == 1) {
-        HandleRecursion(dir, dirName);
+        // rewinddir(dir);
+        HandleRecursion(dir, localDir);
     }
     
     /* Close the directory. */
@@ -144,12 +154,10 @@ static void OpenDirAndPrintContents(char *dirName) {
  * directory within the specified directory.
  * dirName parameter should specify the entire path.
  */
-static void HandleRecursion(DIR *dir, char *dirName) {
-    printf("\nRecursion time\n");
-    rewinddir(dir);
-    printf("Rewinded\n");
+static void HandleRecursion(DIR *dir, char *path) {
     struct stat statBuf;
     struct dirent *dp = NULL;
+    rewinddir(dir);
     
     /* Loop reading each name in the directory and re-traverse any directories found.
      * Skip over anything that isn't a directory.
@@ -161,24 +169,23 @@ static void HandleRecursion(DIR *dir, char *dirName) {
             if (dp->d_name[0] != '.') {
                 /* Append dirname to get full path if needed. */
                 memset(fileNameBuf, 0, NAME_LEN);
-                if (dirName[0] != '/') {
-                    printf("dirName: %s\n", dirName);
-                    realpath(dirName, fileNameBuf);
-                    printf("realPath: %s\n", fileNameBuf);
+                //printf("[DBG] dirName: %s\n", path);
+                realpath(path, fileNameBuf);
+                // printf("[DBG] realPath: %s\n", fileNameBuf);
+                if (fileNameBuf[strlen(fileNameBuf) - 1] != '/') {
                     strncpy(fileNameBuf + strlen(fileNameBuf), "/", 1);
-                    strncpy(fileNameBuf + strlen(fileNameBuf), &dp->d_name[0], strlen(&dp->d_name[0]));
-                } else {
-                    strncpy(fileNameBuf, dirName, strlen(dirName));
                 }
-                
-                printf("fileNameBuf: %s\n", fileNameBuf);
+                strncpy(fileNameBuf + strlen(fileNameBuf), &dp->d_name[0], strlen(&dp->d_name[0]));
+                // printf("[DBG] fileNameBuf: %s\n", fileNameBuf);
+
                 if (lstat(fileNameBuf, &statBuf) == STAT_FAIL_CODE) {
-                    fprintf(stderr, "Stat call failed for %s: \n", &(dp->d_name[0]));
+                    fprintf(stderr, "[DBG] Recur stat call failed for %s: \n", fileNameBuf);
                     perror("");
                     free(flags);
                     exit(0);
                 }
                 if (S_ISDIR(statBuf.st_mode)) {
+                    // printf("[DBG] open dir: %s\n", fileNameBuf);
                     OpenDirAndPrintContents(fileNameBuf);
                 }
             }
@@ -229,21 +236,42 @@ static uint8_t ParseFlagsFromArgs(char *argString) {
  * Takes a list of file and directory names, then outputs to terminal the files
  * and directories in the format specified by any flags inputted by the user.
  */
-static void PrintFileNameInfo(char *dirName, LIST *fileNames) {
-    ListFirst(fileNames);
-    
+static void PrintFileNameInfo(char *pathToFile, char *fileName) {
     /* Formatting for l flag = false. */
     if (!flags->fields.l) {
-        for (int i = 0; i < ListCount(fileNames); i++) {
-            printf("%s\n",ListCurr(fileNames));
-            ListNext(fileNames);
+        if (flags->fields.i) {
+            PrintSimpleNameWithIno(pathToFile, fileName);
+        } else {
+            printf("%s\n", fileName);
         }
     } else { /* Formatting for l flag = true. */
-        for (int i = 0; i < ListCount(fileNames); i++) {
-            PrintFileDescLine(dirName, ListCurr(fileNames));
-            ListNext(fileNames);
-        }
+        PrintFileDescLine(pathToFile, fileName);
     }
+}
+
+/**
+ * Prints the file name with the inode number prepended.
+ */
+static void PrintSimpleNameWithIno(char *dirName, char *fileName) {
+    struct stat statBuf;
+    char nameBuf[NAME_LEN];
+
+    /* Append directory name to file name. */
+    memset(nameBuf, 0, NAME_LEN);
+    strncpy(nameBuf, dirName, strlen(dirName));
+    if (nameBuf[strlen(nameBuf) - 1] != '/') {
+        strncpy(nameBuf + strlen(nameBuf), "/", 1);
+    }
+    strncpy(nameBuf + strlen(nameBuf), fileName, strlen(fileName));
+            
+    /* Get file info using stat system call. */
+    if (lstat(nameBuf, &statBuf) == STAT_FAIL_CODE) {
+        fprintf(stderr, "Stat call failed for %s: ", nameBuf);
+        perror("");
+        free(flags);
+        exit(0);
+    }
+    printf("%llu %s\n", statBuf.st_ino, fileName);
 }
 
 /**
@@ -253,16 +281,20 @@ static void PrintFileNameInfo(char *dirName, LIST *fileNames) {
  */
 static void PrintFileDescLine(char *dirName, char *fileName) {
     struct stat statBuf;
+    char nameBuf[NAME_LEN];
     
     /* Append directory name to file name. */
-    memset(fileNameBuf, 0, NAME_LEN);
-    strncpy(fileNameBuf, dirName, strlen(dirName));
-    strncpy(fileNameBuf + strlen(dirName), "/", 1);
-    strncpy(fileNameBuf + strlen(dirName) + 1, fileName, strlen(fileName));
+    memset(nameBuf, 0, NAME_LEN);
+    strncpy(nameBuf, dirName, strlen(dirName));
+    if (nameBuf[strlen(nameBuf) - 1] != '/') {
+        strncpy(nameBuf + strlen(nameBuf), "/", 1);
+    }
+    strncpy(nameBuf + strlen(nameBuf), fileName, strlen(fileName));
     
     /* Get file info using stat system call. */
-    if (lstat(fileNameBuf, &statBuf) == STAT_FAIL_CODE) {
-        fprintf(stderr, "Stat call failed for %s: ", fileNameBuf);
+    //printf("Desc line namebuf: %s\n", nameBuf);
+    if (lstat(nameBuf, &statBuf) == STAT_FAIL_CODE) {
+        fprintf(stderr, "Stat call failed for %s: ", nameBuf);
         perror("");
         free(flags);
         exit(0);
@@ -284,11 +316,11 @@ static void PrintFileDescLine(char *dirName, char *fileName) {
         /* Set string denoting which file the link points to. */
         ssize_t len = 0;
         snprintf(linkNameBuf, strlen(" -> ") + 1, " -> ");
-        if ((len = readlink(fileNameBuf,
+        if ((len = readlink(fileName,
                             linkNameBuf + strlen(" -> "),
                             sizeof(linkNameBuf) - 3))
             != -1) {
-            linkNameBuf[len + strlen(" -> ") + 1] = '\0';
+            linkNameBuf[len + strlen(" -> ")] = '\0';
         }
     }
     
@@ -301,7 +333,7 @@ static void PrintFileDescLine(char *dirName, char *fileName) {
     BuildDateString(dateString, &(statBuf.st_mtime));
     
     /* Print entire file desc string. */
-    printf("%s%c%s %u %s  %s  %5llu %s %s%s\n",
+    printf("%s%c%s %3u %s  %s  %9llu %s %s%s\n",
            inodeBuf,
            dirChar,
            permissionString,
