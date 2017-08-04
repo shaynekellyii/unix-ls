@@ -6,6 +6,11 @@
 /***************************************************************
  * Structs                                                     *
  ***************************************************************/
+
+/** 
+ * FLAGS struct, for keeping track of which arguments are supplied to ls.
+ * Only -i, -l, -R implemented.
+ */
 typedef union FLAGS {
     struct {
         unsigned int i : 1;

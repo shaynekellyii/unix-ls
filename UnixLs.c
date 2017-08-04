@@ -39,7 +39,7 @@ char *dirName;              /* The directory to ls, if specified. */
 char fileNameBuf[NAME_LEN]; /* Store a directory name with file name appended. */
 char linkNameBuf[NAME_LEN]; /* Store the filename that a symbolic link points to. */
 char inodeBuf[INODE_LEN];   /* Store the inode number to print to the screen. */
-uint8_t firstDirPrinted = 0;/* Keeps track if the first directory was printed (for recursion). */
+uint8_t printDirTitle = 0;  /* Keeps track if the directory name should be printed before its contents. */
 
 /***************************************************************
  * Function Prototypes                                         *
@@ -58,39 +58,35 @@ static void BuildDateString(char *string, time_t *time);
  ***************************************************************/
 
 int main(int argc, char *argv[]) {
-    firstDirPrinted = 0;
     flags = (FLAGS *)malloc(sizeof(FLAGS));
     dirName = ".";
-    
-    /**
-     * Parse all flag arguments from terminal.
-     * Only the last arg can specify a directory. 
-     */
-    for (int i = 1; i < argc - 1; i++) {
-        char *currentArg = argv[i];
-        if (!ParseFlagsFromArgs(currentArg)) {
+    uint8_t argIndex = 1;
+
+    /* Parse all arguments starting with - for flags. */
+    char *currentArg = argv[argIndex];
+    while (argIndex < argc && currentArg[0] == '-') {
+        if (!ParseFlagsFromArgs(argv[argIndex])) {
             free(flags);
             exit(0);
         }
+        currentArg = argv[++argIndex];
+    }
+
+    /**
+     * Check if there are multiple directories to be printed.
+     * The directory title should be printed before the contents).
+     */
+    if (argc - argIndex > 1) {
+        printDirTitle = 1;
+    }
+
+    /* Print directory contents for the remaining arguments (if any, if not print contents of "."). */
+    for (int i = argIndex; i < argc; i++) {
+        currentArg = argv[i];
+        OpenDirAndPrintContents(currentArg);
     }
     
-    /* Check if last argument specifies a directory or a flag (if arguments are specified). */
-    if (argc > 1) {
-        char *currentArg = argv[argc - 1];
-        if (currentArg[0] == '-') {
-            /* Parse flags from last arg. Directory to search is current directory. */
-            if (!ParseFlagsFromArgs(currentArg)) {
-                free(flags);
-                exit(0);
-            }
-        } else {
-            dirName = argv[argc - 1];
-        }
-    }
-    
-    //strncpy(fileNameBuf, dirName, strlen(dirName));
-    OpenDirAndPrintContents(dirName);
-    
+    /* Clean up allocated dynamic memory. */
     free(flags);
     exit(0);
 }
@@ -112,7 +108,7 @@ static void OpenDirAndPrintContents(char *dirToPrint) {
     strncpy(localDir, dirToPrint, strlen(dirToPrint));
 
     /* Print the directory name if more than one is being printed (for recursion). */
-    if (firstDirPrinted) {
+    if (printDirTitle) {
         printf("\n%s:\n", localDir);
     }
     
@@ -133,7 +129,7 @@ static void OpenDirAndPrintContents(char *dirToPrint) {
             }
         }
     } while (dp != NULL);
-    firstDirPrinted = 1;
+    printDirTitle = 1;
     
     /* Handle recursion if necessary. */
     if (flags->fields.R == 1) {
@@ -317,11 +313,11 @@ static void PrintFileDescLine(char *dirName, char *fileName) {
         /* Set string denoting which file the link points to. */
         ssize_t len = 0;
         snprintf(linkNameBuf, strlen(" -> ") + 1, " -> ");
-        if ((len = readlink(fileName,
-                            linkNameBuf + strlen(" -> "),
-                            sizeof(linkNameBuf) - 3))
+        if ((len = readlink(nameBuf,
+                            linkNameBuf + strlen(linkNameBuf),
+                            sizeof(linkNameBuf) - strlen(linkNameBuf)))
             != -1) {
-            linkNameBuf[len + strlen(" -> ")] = '\0';
+            //linkNameBuf[len + strlen(" -> ")] = '\0';
         }
     }
     
